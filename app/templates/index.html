@@ -1,0 +1,297 @@
+<!-- app/templates/index.html -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Система скоринга потенциальных банкротов</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.0/font/bootstrap-icons.css">
+    <style>
+        .status-indicator {
+            height: 20px;
+            width: 20px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 10px;
+        }
+        .status-idle { background-color: #6c757d; }
+        .status-running { background-color: #ffc107; animation: pulse 1s infinite; }
+        .status-completed { background-color: #28a745; }
+        .status-error { background-color: #dc3545; }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .progress-container {
+            margin: 20px 0;
+        }
+        
+        .log-container {
+            max-height: 300px;
+            overflow-y: auto;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 15px;
+        }
+        
+        .file-card {
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="text-center mb-4">Система скоринга потенциальных банкротов</h1>
+        
+        <!-- Статус обработки -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5>Статус обработки</h5>
+            </div>
+            <div class="card-body">
+                <div class="d-flex align-items-center mb-3">
+                    <div class="status-indicator status-{{ status }}"></div>
+                    <div>
+                        <strong id="stage">{{ stage }}</strong>
+                        <div id="message">{{ message }}</div>
+                    </div>
+                </div>
+                
+                <div class="progress-container">
+                    <div class="progress">
+                        <div id="progress-bar" class="progress-bar" role="progressbar" 
+                             style="width: {{ progress }}%;" 
+                             aria-valuenow="{{ progress }}" 
+                             aria-valuemin="0" 
+                             aria-valuemax="100">{{ progress }}%</div>
+                    </div>
+                </div>
+                
+                <div class="d-flex justify-content-between mt-3">
+                    <button id="start-btn" class="btn btn-primary" 
+                            {{ 'disabled' if status == 'running' else '' }}>
+                        <i class="bi bi-play-circle"></i> Запустить скоринг
+                    </button>
+                    
+                    <button id="download-btn" class="btn btn-success" 
+                            {{ 'disabled' if not (status == 'completed' and result) else '' }}>
+                        <i class="bi bi-download"></i> Скачать результат
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Блок 1: Настройки фильтрации -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5>📍 Настройки фильтрации</h5>
+            </div>
+            <div class="card-body">
+                <form id="scoringForm">
+                    <!-- География -->
+                    <div class="mb-3">
+                        <label class="form-label">География (регион):</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" value="77" id="region_moscow" name="regions">
+                            <label class="form-check-label" for="region_moscow">Москва</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" value="16" id="region_tatarstan" name="regions">
+                            <label class="form-check-label" for="region_tatarstan">Татарстан</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" value="64" id="region_saratov" name="regions">
+                            <label class="form-check-label" for="region_saratov">Саратов</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" value="40" id="region_kaluga" name="regions">
+                            <label class="form-check-label" for="region_kaluga">Калуга</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="select_all_regions">
+                            <label class="form-check-label" for="select_all_regions">Выбрать всё</label>
+                        </div>
+                    </div>
+                    
+                    <!-- Сумма долга -->
+                    <div class="mb-3">
+                        <label class="form-label">Минимальная сумма долга (руб.):</label>
+                        <input type="number" class="form-control" name="min_debt_amount" value="250000">
+                    </div>
+                    
+                    <!-- Дополнительные фильтры -->
+                    <div class="mb-3">
+                        <label class="form-label">Дополнительные фильтры:</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="exclude_bankrupts" id="exclude_bankrupts" checked>
+                            <label class="form-check-label" for="exclude_bankrupts">Исключать признанных банкротов</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="exclude_no_debt" id="exclude_no_debt" checked>
+                            <label class="form-check-label" for="exclude_no_debt">Исключать контакты без долгов</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="only_with_property" id="only_with_property">
+                            <label class="form-check-label" for="only_with_property">Только с недвижимостью</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="only_bank_mfo_debt" id="only_bank_mfo_debt">
+                            <label class="form-check-label" for="only_bank_mfo_debt">Только с банковскими или МФО-долгами</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="only_recent_court_orders" id="only_recent_court_orders">
+                            <label class="form-check-label" for="only_recent_court_orders">Только с судебными приказами за последние 3 месяца</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="only_active_inn" id="only_active_inn" checked>
+                            <label class="form-check-label" for="only_active_inn">Только с живыми ИНН</label>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <!-- Блок 2: Загруженные файлы -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5>📁 Загруженные файлы</h5>
+            </div>
+            <div class="card-body">
+                <div id="files-container">
+                    {% for file in files %}
+                    <div class="card file-card">
+                        <div class="card-body">
+                            <h6 class="card-title">{{ file.filename }}</h6>
+                            <p class="card-text">
+                                <small class="text-muted">
+                                    Источник: {{ file.source }} | 
+                                    Размер: {{ file.size_mb|round(2) }} MB | 
+                                    Изменен: {{ file.last_modified }}
+                                </small>
+                            </p>
+                        </div>
+                    </div>
+                    {% else %}
+                    <div class="alert alert-info">Нет загруженных файлов</div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        
+        <!-- Блок 3: Логи и статистика -->
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5>📝 Журнал ошибок</h5>
+                <button id="refresh-logs" class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-arrow-repeat"></i> Обновить
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="log-container" id="logs-container">
+                    <!-- Логи будут загружены через AJAX -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+        $(document).ready(function() {
+            // Обновление статуса
+            function updateStatus() {
+                $.get("/status", function(data) {
+                    $("#progress-bar")
+                        .css("width", data.progress + "%")
+                        .attr("aria-valuenow", data.progress)
+                        .text(data.progress + "%");
+                    
+                    $("#stage").text(data.stage);
+                    $("#message").text(data.message);
+                    
+                    // Обновляем класс статуса
+                    $(".status-indicator")
+                        .removeClass("status-idle status-running status-completed status-error")
+                        .addClass("status-" + data.status);
+                    
+                    // Обновляем состояние кнопок
+                    $("#start-btn").prop("disabled", data.status === "running");
+                    $("#download-btn").prop("disabled", !(data.status === "completed" && data.result));
+                });
+            }
+            
+            // Загрузка логов
+            function loadLogs() {
+                $.get("/logs?limit=10", function(logs) {
+                    const container = $("#logs-container");
+                    container.empty();
+                    
+                    if (logs.length === 0) {
+                        container.append('<div class="text-center text-muted">Нет ошибок</div>');
+                        return;
+                    }
+                    
+                    logs.forEach(log => {
+                        const logElement = `
+                            <div class="log-entry mb-2">
+                                <div class="d-flex justify-content-between">
+                                    <strong>${log.source}</strong>
+                                    <small>${new Date(log.timestamp).toLocaleString()}</small>
+                                </div>
+                                <div><small>${log.error_type}: ${log.error_message}</small></div>
+                                ${log.lead_id ? `<div><small>Lead ID: ${log.lead_id}</small></div>` : ''}
+                            </div>
+                            <hr>
+                        `;
+                        container.append(logElement);
+                    });
+                });
+            }
+            
+            // Запуск скоринга
+            $("#start-btn").click(function() {
+                const formData = $("#scoringForm").serializeArray();
+                const data = {};
+                
+                formData.forEach(item => {
+                    if (item.name === "regions") {
+                        if (!data[item.name]) data[item.name] = [];
+                        data[item.name].push(item.value);
+                    } else {
+                        data[item.name] = item.value;
+                    }
+                });
+                
+                $.post("/start-scoring", data, function() {
+                    updateStatus();
+                });
+            });
+            
+            // Скачивание результатов
+            $("#download-btn").click(function() {
+                window.location.href = "/download";
+            });
+            
+            // Обновление логов
+            $("#refresh-logs").click(loadLogs);
+            
+            // Выбор всех регионов
+            $("#select_all_regions").change(function() {
+                const isChecked = $(this).prop("checked");
+                $("input[name='regions']").prop("checked", isChecked);
+            });
+            
+            // Периодическое обновление статуса
+            setInterval(updateStatus, 5000);
+            
+            // Инициализация
+            updateStatus();
+            loadLogs();
+        });
+    </script>
+</body>
+</html>

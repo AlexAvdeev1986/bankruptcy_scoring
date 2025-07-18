@@ -1,0 +1,30 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  web:
+    build: .
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://user:password@db/bankruptcy_db
+    depends_on:
+      - db
+
+  db:
+    image: postgres:13
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: bankruptcy_db
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+
+  proxy_pool:
+    image: proxy_pool:latest
+    # Конфигурация пула прокси
+
+volumes:
+  pgdata:
