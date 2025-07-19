@@ -1,17 +1,18 @@
-# app/utils.py
 import pandas as pd
 import logging
 from typing import List, Dict
 from pathlib import Path
 import csv
 from datetime import datetime
-from app.config import settings
-from app.database import engine
+from app.database import AsyncSessionLocal, engine
 import os
 import json
 import asyncio
 from sqlalchemy import text
 import aiofiles
+from app.config import settings
+from app.models import ErrorLog
+import shutil
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ class FileManager:
             async with engine.connect() as conn:
                 result = await conn.stream(
                     text("""
-                    SELECT phone, fio, score, reason_1, reason_2, reason_3, group_name
+                    SELECT phone, fio, score, reason_1, reason_2, reason_3, group_name as group
                     FROM leads 
                     WHERE is_target = TRUE 
                     ORDER BY score DESC
@@ -49,7 +50,7 @@ class FileManager:
                     
                     batch = []
                     async for row in result:
-                        batch.append(row)
+                        batch.append(tuple(row))
                         if len(batch) >= 10000:
                             await writer.writerows(batch)
                             batch = []
@@ -58,7 +59,7 @@ class FileManager:
                         await writer.writerows(batch)
                 
             # Переименовываем после успешной записи
-            os.rename(temp_path, output_path)
+            shutil.move(temp_path, output_path)
             return str(output_path)
             
         except Exception as e:
@@ -113,12 +114,10 @@ class LogManager:
     def setup_logging(self):
         """Настройка логирования"""
         log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        log_file = Path(settings.LOGS_PATH) / 'scoring.log'
         
         # Логи в файл
-        file_handler = logging.FileHandler(
-            Path(settings.LOGS_PATH) / 'scoring.log',
-            encoding='utf-8'
-        )
+        file_handler = logging.FileHandler(log_file, encoding='utf-8')
         file_handler.setFormatter(logging.Formatter(log_format))
         
         # Логи в консоль
@@ -126,10 +125,10 @@ class LogManager:
         console_handler.setFormatter(logging.Formatter(log_format))
         
         # Настройка корневого логгера
-        logger = logging.getLogger()
-        logger.setLevel(logging.INFO)
-        logger.addHandler(file_handler)
-        logger.addHandler(console_handler)
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging.INFO)
+        root_logger.addHandler(file_handler)
+        root_logger.addHandler(console_handler)
     
     async def get_error_logs(self, limit: int = 100) -> List[dict]:
         """Получение логов ошибок"""
@@ -166,6 +165,8 @@ class PipelineManager:
             'scoring': self.run_scoring,
             'export': self.run_export
         }
+        self.file_manager = FileManager()
+        self.log_manager = LogManager()
     
     def run_normalization(self):
         from app.normalization import DataNormalizer
@@ -183,8 +184,7 @@ class PipelineManager:
         await processor.process_all_leads(filters)
     
     async def run_export(self):
-        file_manager = FileManager()
-        return await file_manager.export_target_leads()
+        return await self.file_manager.export_target_leads()
     
     async def get_database_stats(self) -> dict:
         """Получение статистики по базе данных"""

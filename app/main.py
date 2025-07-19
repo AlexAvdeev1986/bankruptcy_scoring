@@ -1,18 +1,28 @@
-# app/main.py
 from fastapi import FastAPI, Request, Form, BackgroundTasks, HTTPException
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
-from pydantic import BaseModel
 from datetime import datetime
 import asyncio
-import json
-import os
 import logging
 from app.config import settings
-from app.utils import PipelineManager, FileManager, LogManager
-from app.models import ScoringRequest
-from app.database import create_tables
+from app.utils import PipelineManager
+from app.models import StatusResponse, ScoringRequest
+from app.database import Base, engine
+import time
+import os
+
+# Настройка логгера
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(os.path.join(settings.LOGS_PATH, "app.log"))
+    ]
+)
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Система скоринга по банкротству",
@@ -26,8 +36,6 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 # Инициализация компонентов
 pipeline = PipelineManager()
-file_manager = FileManager()
-log_manager = LogManager()
 
 # Состояние обработки
 class ProcessingState:
@@ -42,26 +50,20 @@ class ProcessingState:
 
 state = ProcessingState()
 
-class StatusResponse(BaseModel):
-    status: str
-    progress: int
-    stage: str
-    message: str
-    duration: float
-    result: dict = None
-
 @app.on_event("startup")
 async def startup_event():
     """Инициализация при запуске"""
-    create_tables()
-    logger = logging.getLogger(__name__)
+    # Создание таблиц (если не используются миграции)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    
     logger.info("Application started")
-    file_manager.ensure_directories()
+    pipeline.file_manager.ensure_directories()
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """Главная страница"""
-    files = file_manager.get_input_files_info()
+    files = pipeline.file_manager.get_input_files_info()
     return templates.TemplateResponse("index.html", {
         "request": request,
         "status": state.status,
@@ -101,7 +103,7 @@ async def start_scoring(
     state.progress = 0
     state.current_stage = ""
     state.message = "Запуск обработки"
-    state.start_time = datetime.now()
+    state.start_time = time.time()
     state.result = None
     state.filters = filters
     
@@ -154,11 +156,11 @@ async def run_processing_pipeline(filters: dict):
         state.status = "error"
         state.message = f"Ошибка: {str(e)}"
         state.result = None
-        logging.exception("Ошибка в процессе обработки")
+        logger.exception("Ошибка в процессе обработки")
 
 @app.get("/status", response_model=StatusResponse)
 async def get_status():
-    duration = (datetime.now() - state.start_time).total_seconds() if state.start_time else 0
+    duration = time.time() - state.start_time if state.start_time else 0
     return StatusResponse(
         status=state.status,
         progress=state.progress,
@@ -181,7 +183,7 @@ async def download_results():
 
 @app.get("/logs")
 async def get_logs(limit: int = 100):
-    logs = await log_manager.get_error_logs(limit)
+    logs = await pipeline.log_manager.get_error_logs(limit)
     return logs
 
 @app.get("/stats")
@@ -191,7 +193,7 @@ async def get_stats():
 
 @app.get("/files")
 async def get_files():
-    files = file_manager.get_input_files_info()
+    files = pipeline.file_manager.get_input_files_info()
     return files
 
 if __name__ == "__main__":

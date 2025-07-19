@@ -1,13 +1,13 @@
-# app/scoring.py
 from typing import Dict, List, Tuple
 import logging
 from datetime import datetime, timedelta
-from app.database import SessionLocal, AsyncSessionLocal
+from app.database import AsyncSessionLocal
 from app.models import Lead, ScoringHistory
-import numpy as np
 import asyncio
 from sqlalchemy import text, update
 from sqlalchemy.dialects.postgresql import insert
+import json
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -32,58 +32,52 @@ class ScoringEngine:
         score = 0
         reasons = []
         
-        # +30 - если сумма долгов больше 250,000 рублей
+        # Применяем правила скоринга
         if lead_data.get('debt_amount', 0) > self.scoring_rules['high_debt']['threshold']:
             score += self.scoring_rules['high_debt']['score']
             reasons.append(f"Долг {lead_data.get('debt_amount', 0):.0f} руб.")
         
-        # +20 - если долг от банка или МФО
         if lead_data.get('debt_type') in ['bank', 'mfo']:
             score += self.scoring_rules['bank_mfo_debt']['score']
             reasons.append("Долг перед банком/МФО")
         
-        # +10 - если нет имущества
         if not lead_data.get('has_property', False):
             score += self.scoring_rules['no_property']['score']
             reasons.append("Нет недвижимости")
         
-        # +15 - если есть судебный приказ за последние 3 месяца
         if lead_data.get('has_court_order', False):
-            score += self.scoring_rules['recent_court_order']['score']
-            reasons.append("Судебный приказ")
+            # Проверяем, что приказ не старше 3 месяцев
+            if 'court_order_date' in lead_data and lead_data['court_order_date']:
+                order_date = lead_data['court_order_date']
+                if datetime.now() - order_date < timedelta(days=90):
+                    score += self.scoring_rules['recent_court_order']['score']
+                    reasons.append("Судебный приказ (последние 3 мес.)")
         
-        # +10 - если нет признаков банкротства
         if not lead_data.get('is_bankrupt', False):
             score += self.scoring_rules['no_bankruptcy']['score']
             reasons.append("Не банкрот")
         
-        # +5 - если ИНН активен
         if lead_data.get('inn_active', True):
             score += self.scoring_rules['active_inn']['score']
             reasons.append("Активный ИНН")
         
-        # +5 - если более двух долгов
         debt_count = lead_data.get('debt_count', 1)
         if debt_count >= self.scoring_rules['multiple_debts']['threshold']:
             score += self.scoring_rules['multiple_debts']['score']
             reasons.append(f"Множественные долги ({debt_count})")
         
-        # -15 - если долг менее 100,000 рублей
         if 0 < lead_data.get('debt_amount', 0) < self.scoring_rules['low_debt']['threshold']:
             score += self.scoring_rules['low_debt']['score']
             reasons.append("Малый долг")
         
-        # -10 - если долги только налоговые/ЖКХ
         if lead_data.get('debt_type') in ['tax', 'utility']:
             score += self.scoring_rules['tax_utility_only']['score']
             reasons.append("Только налоги/ЖКХ")
         
-        # -100 - если человек признан банкротом
         if lead_data.get('is_bankrupt', False):
             score += self.scoring_rules['is_bankrupt']['score']
             reasons.append("Банкрот")
         
-        # -100 - если ИНН мертвый
         if not lead_data.get('inn_active', True):
             score += self.scoring_rules['dead_inn']['score']
             reasons.append("Неактивный ИНН")
@@ -110,31 +104,24 @@ class ScoringEngine:
     
     def apply_filters(self, lead_data: Dict, filters: Dict) -> bool:
         """Применение фильтров"""
-        # Минимальная сумма долга
         if lead_data.get('debt_amount', 0) < filters.get('min_debt_amount', 0):
             return False
         
-        # Исключать банкротов
         if filters.get('exclude_bankrupts', False) and lead_data.get('is_bankrupt', False):
             return False
         
-        # Исключать контакты без долгов
         if filters.get('exclude_no_debt', False) and lead_data.get('debt_amount', 0) == 0:
             return False
         
-        # Только с недвижимостью
         if filters.get('only_with_property', False) and not lead_data.get('has_property', False):
             return False
         
-        # Только с банковскими/МФО долгами
         if filters.get('only_bank_mfo_debt', False) and lead_data.get('debt_type') not in ['bank', 'mfo']:
             return False
         
-        # Только с судебными приказами
         if filters.get('only_recent_court_orders', False) and not lead_data.get('has_court_order', False):
             return False
         
-        # Только с живыми ИНН
         if filters.get('only_active_inn', False) and not lead_data.get('inn_active', True):
             return False
         
@@ -157,7 +144,7 @@ class ScoringProcessor:
         async with AsyncSessionLocal() as db:
             # Получаем общее количество лидов для обработки
             result = await db.execute(
-                text("SELECT COUNT(*) FROM leads WHERE score IS NULL")
+                "SELECT COUNT(*) FROM leads WHERE score IS NULL"
             )
             total_count = result.scalar()
             
@@ -174,8 +161,7 @@ class ScoringProcessor:
             for i in range(batch_count):
                 offset = i * self.batch_size
                 result = await db.execute(
-                    text("SELECT * FROM leads WHERE score IS NULL ORDER BY lead_id LIMIT :limit OFFSET :offset"),
-                    {'limit': self.batch_size, 'offset': offset}
+                    f"SELECT * FROM leads WHERE score IS NULL ORDER BY lead_id LIMIT {self.batch_size} OFFSET {offset}"
                 )
                 leads = result.scalars().all()
                 
@@ -294,6 +280,7 @@ class ScoringProcessor:
             'debt_type': lead.debt_type,
             'has_property': lead.has_property,
             'has_court_order': lead.has_court_order,
+            'court_order_date': lead.court_order_date,
             'is_bankrupt': lead.is_bankrupt,
             'inn_active': lead.inn_active,
             'debt_count': lead.debt_count

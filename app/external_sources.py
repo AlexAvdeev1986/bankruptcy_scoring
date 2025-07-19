@@ -1,4 +1,3 @@
-# app/external_sources.py
 import aiohttp
 import asyncio
 import random
@@ -6,11 +5,11 @@ import logging
 from typing import Dict, List, Optional
 from fake_useragent import UserAgent
 from app.config import settings
-from app.database import AsyncSessionLocal, SessionLocal
+from app.database import AsyncSessionLocal
 from app.models import Lead, ErrorLog
 import backoff
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 
 logger = logging.getLogger(__name__)
@@ -25,9 +24,10 @@ class ExternalDataEnricher:
         self.total_enriched = 0
 
     def _load_proxies(self) -> List[str]:
-        """Загрузка списка прокси из файла или БД"""
-        # В реальной системе загрузка из внешнего источника
-        return [f"http://proxy{i}:8080" for i in range(1, 301)]
+        """Загрузка списка прокси"""
+        if not settings.PROXY_LIST:
+            return []
+        return [p.strip() for p in settings.PROXY_LIST]
     
     async def _get_session(self) -> aiohttp.ClientSession:
         """Получение сессии с ротацией прокси"""
@@ -51,7 +51,7 @@ class ExternalDataEnricher:
         """Безопасный запрос с повторными попытками"""
         async with self.semaphore:
             session = await self._get_session()
-            proxy = random.choice(self.proxies) if settings.PROXY_ROTATION_ENABLED else None
+            proxy = random.choice(self.proxies) if settings.PROXY_ROTATION_ENABLED and self.proxies else None
             
             try:
                 async with session.get(url, params=params, proxy=proxy) as response:
@@ -89,7 +89,7 @@ class ExternalDataEnricher:
                 return result
                 
             data = await self.safe_request(
-                f"{settings.FSSP_BASE_URL}/api/search",
+                "https://api.fssp.gov.ru/v1/search",
                 search_params
             )
             
@@ -146,7 +146,7 @@ class ExternalDataEnricher:
         """Проверка банкротства через Федресурс"""
         try:
             data = await self.safe_request(
-                f"{settings.FEDRESURS_API_URL}/search",
+                "https://fedresurs.ru/backend/companies",
                 {'inn': inn}
             )
             
@@ -167,11 +167,11 @@ class ExternalDataEnricher:
         """Проверка недвижимости через Росреестр"""
         try:
             data = await self.safe_request(
-                f"{settings.ROSREESTR_API_URL}/property",
+                "https://rosreestr.gov.ru/api/online/fir_objects",
                 {'inn': inn}
             )
             
-            return len(data.get('properties', [])) > 0
+            return len(data.get('objects', [])) > 0
         except Exception as e:
             logger.error(f"Ошибка при проверке Росреестр: {e}")
             return False
@@ -189,7 +189,7 @@ class ExternalDataEnricher:
                 search_name += f".{name_parts[2][0]}."
                 
             data = await self.safe_request(
-                f"{settings.COURT_API_URL}/search",
+                "https://api.courts.ru/api/search",
                 {'query': search_name, 'type': 'individual'}
             )
             
@@ -204,14 +204,17 @@ class ExternalDataEnricher:
             for item in data['results']:
                 # Проверяем, что это судебный приказ и он активен
                 if item.get('type') == 'court_order' and item.get('status') == 'active':
-                    return True
+                    # Проверяем, что приказ не старше 3 месяцев
+                    order_date = datetime.strptime(item['date'], '%Y-%m-%d')
+                    if datetime.now() - order_date < timedelta(days=90):
+                        return True
         return False
     
     async def check_inn_status(self, inn: str) -> bool:
         """Проверка статуса ИНН"""
         try:
             data = await self.safe_request(
-                f"{settings.TAX_API_URL}/inn.do",
+                "https://service.nalog.ru/inn-proc.do",
                 {'inn': inn}
             )
             
@@ -227,7 +230,7 @@ class ExternalDataEnricher:
             fssp_data = await self.enrich_fssp_data(
                 inn=lead.inn,
                 fio=lead.fio,
-                dob=lead.dob
+                dob=lead.dob.strftime('%Y-%m-%d') if lead.dob else None
             )
             
             # Обновляем поля лида
@@ -260,8 +263,8 @@ class ExternalDataEnricher:
             try:
                 # Получаем лиды для обогащения
                 result = await db.execute(
-                    text("SELECT * FROM leads WHERE lead_id = ANY(:ids)"),
-                    {'ids': lead_ids}
+                    f"SELECT * FROM leads WHERE lead_id IN :ids",
+                    {'ids': tuple(lead_ids)}
                 )
                 leads = result.scalars().all()
                 
@@ -285,7 +288,7 @@ class ExternalDataEnricher:
         async with AsyncSessionLocal() as db:
             # Получаем общее количество лидов для обогащения
             result = await db.execute(
-                text("SELECT COUNT(*) FROM leads WHERE debt_amount IS NULL")
+                "SELECT COUNT(*) FROM leads WHERE debt_amount IS NULL"
             )
             total_count = result.scalar()
             
@@ -301,8 +304,7 @@ class ExternalDataEnricher:
             for i in range(batch_count):
                 offset = i * self.batch_size
                 result = await db.execute(
-                    text("SELECT lead_id FROM leads WHERE debt_amount IS NULL ORDER BY lead_id LIMIT :limit OFFSET :offset"),
-                    {'limit': self.batch_size, 'offset': offset}
+                    f"SELECT lead_id FROM leads WHERE debt_amount IS NULL ORDER BY lead_id LIMIT {self.batch_size} OFFSET {offset}"
                 )
                 lead_ids = [row[0] for row in result.all()]
                 

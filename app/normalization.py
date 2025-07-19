@@ -1,4 +1,3 @@
-# app/normalization.py
 import pandas as pd
 import re
 import logging
@@ -8,11 +7,10 @@ from app.config import settings
 from app.database import SessionLocal
 from app.models import Lead
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy import text
-import numpy as np
 import os
 import csv
 from datetime import datetime
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +19,9 @@ class DataNormalizer:
         self.phone_pattern = re.compile(r'[^\d]')
         self.inn_pattern = re.compile(r'^\d{10,12}$')
         self.batch_size = settings.BATCH_SIZE
+        self.processed_files = set()
 
-    def normalize_phone(self, phone: str) -> str:
+    def normalize_phone(self, phone: str) -> Optional[str]:
         """Нормализация телефона к формату +7XXXXXXXXXX"""
         if pd.isna(phone) or not phone:
             return None
@@ -40,7 +39,7 @@ class DataNormalizer:
             
         return None
     
-    def normalize_fio(self, fio: str) -> str:
+    def normalize_fio(self, fio: str) -> Optional[str]:
         """Нормализация ФИО"""
         if pd.isna(fio) or not fio:
             return None
@@ -50,7 +49,7 @@ class DataNormalizer:
         if len(parts) < 2:
             return fio.title()
             
-        # Восстановление полного ФИО: Фамилия Имя Отчество
+        # Восстановление полного ФИО
         last_name = parts[0].title()
         first_name = parts[1].title() if len(parts) > 1 else ""
         patronymic = parts[2].title() if len(parts) > 2 else ""
@@ -218,6 +217,8 @@ class DataNormalizer:
             if batch:
                 self.bulk_insert_leads(batch)
             
+            # Помечаем файл как обработанный
+            self.processed_files.add(file_path.name)
             return True
         except Exception as e:
             logger.error(f"Ошибка при обработке файла {file_path}: {e}")
@@ -234,7 +235,7 @@ class DataNormalizer:
             return 0
         
         for file_path in input_path.glob("*.csv"):
-            if not file_path.is_file():
+            if not file_path.is_file() or file_path.name in self.processed_files:
                 continue
                 
             logger.info(f"Начата обработка файла: {file_path.name}")

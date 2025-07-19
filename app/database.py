@@ -1,4 +1,3 @@
-# app/database.py
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
@@ -52,9 +51,4 @@ async def get_async_db():
     """Асинхронная сессия для операций чтения"""
     async with AsyncSessionLocal() as session:
         yield session
-
-def create_tables():
-    """Создание таблиц в базе данных"""
-    import app.models
-    Base.metadata.create_all(bind=engine)
-    logger.info("Database tables created")
+        

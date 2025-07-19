@@ -1,0 +1,44 @@
+.status-indicator {
+    height: 20px;
+    width: 20px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 10px;
+}
+
+.status-idle { background-color: #6c757d; }
+.status-running { 
+    background-color: #ffc107; 
+    animation: pulse 1s infinite; 
+}
+.status-completed { background-color: #28a745; }
+.status-error { background-color: #dc3545; }
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+
+.progress-container {
+    margin: 20px 0;
+}
+
+.log-container {
+    max-height: 300px;
+    overflow-y: auto;
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 5px;
+    padding: 15px;
+}
+
+.file-card {
+    margin-bottom: 10px;
+}
+
+.log-entry {
+    padding: 5px;
+    border-radius: 3px;
+    background-color: #fff;
+}
