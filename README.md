@@ -68,6 +68,12 @@ sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE bankruptcy_db TO user
 ```
 
 3. Примените миграции:
+
+# Инициализируйте Alembic в папке migrations
+```bash
+alembic init migrations
+```
+
 ```bash
 alembic upgrade head
 ```

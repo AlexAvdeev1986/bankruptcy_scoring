@@ -18,6 +18,8 @@ RUN playwright install chromium
 
 COPY . .
 
+COPY migrations /app/migrations
+
 RUN mkdir -p /app/data/input /app/data/output /app/data/logs
 
 RUN chmod +x /app/entrypoint.sh
