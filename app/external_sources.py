@@ -2,6 +2,7 @@ import aiohttp
 import asyncio
 import random
 import logging
+from sqlalchemy import text
 from typing import Dict, List, Optional
 from fake_useragent import UserAgent
 from app.config import settings
@@ -263,7 +264,7 @@ class ExternalDataEnricher:
             try:
                 # Получаем лиды для обогащения
                 result = await db.execute(
-                    f"SELECT * FROM leads WHERE lead_id IN :ids",
+                    text("SELECT * FROM leads WHERE lead_id IN :ids"),
                     {'ids': tuple(lead_ids)}
                 )
                 leads = result.scalars().all()
@@ -285,35 +286,29 @@ class ExternalDataEnricher:
         logger.info("Начато обогащение данных")
         self.total_enriched = 0
         
+        from sqlalchemy import select, func
         async with AsyncSessionLocal() as db:
             # Получаем общее количество лидов для обогащения
             result = await db.execute(
-                "SELECT COUNT(*) FROM leads WHERE debt_amount IS NULL"
+                select(func.count()).select_from(Lead).where(Lead.debt_amount == None)
             )
             total_count = result.scalar()
-            
             if total_count == 0:
                 logger.info("Нет лидов для обогащения")
                 return
-            
             logger.info(f"Всего лидов для обогащения: {total_count}")
-            
             # Разбиваем на батчи
             batch_count = (total_count // self.batch_size) + 1
-            
             for i in range(batch_count):
                 offset = i * self.batch_size
                 result = await db.execute(
-                    f"SELECT lead_id FROM leads WHERE debt_amount IS NULL ORDER BY lead_id LIMIT {self.batch_size} OFFSET {offset}"
+                    select(Lead.lead_id).where(Lead.debt_amount == None).order_by(Lead.lead_id).limit(self.batch_size).offset(offset)
                 )
                 lead_ids = [row[0] for row in result.all()]
-                
                 if not lead_ids:
                     break
-                    
                 logger.info(f"Обработка батча {i+1}/{batch_count} ({len(lead_ids)} лидов)")
                 await self.enrich_batch(lead_ids)
-                
         logger.info(f"Обогащение завершено. Всего обработано: {self.total_enriched} лидов")
     
     async def close(self):

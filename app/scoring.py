@@ -140,37 +140,30 @@ class ScoringProcessor:
     async def process_all_leads(self, filters: Dict):
         """Обработка всех лидов в базе"""
         logger.info("Начато вычисление скоринга")
-        
         async with AsyncSessionLocal() as db:
             # Получаем общее количество лидов для обработки
+            from sqlalchemy import select, func
             result = await db.execute(
-                "SELECT COUNT(*) FROM leads WHERE score IS NULL"
+                select(func.count()).select_from(Lead).where(Lead.score == None)
             )
             total_count = result.scalar()
-            
             if total_count == 0:
                 logger.info("Нет лидов для скоринга")
                 return
-            
             logger.info(f"Всего лидов для скоринга: {total_count}")
-            
             # Разбиваем на батчи
             batch_count = (total_count // self.batch_size) + 1
             processed = 0
-            
             for i in range(batch_count):
                 offset = i * self.batch_size
                 result = await db.execute(
-                    f"SELECT * FROM leads WHERE score IS NULL ORDER BY lead_id LIMIT {self.batch_size} OFFSET {offset}"
+                    select(Lead).where(Lead.score == None).order_by(Lead.lead_id).limit(self.batch_size).offset(offset)
                 )
                 leads = result.scalars().all()
-                
                 if not leads:
                     break
-                    
                 logger.info(f"Обработка батча {i+1}/{batch_count} ({len(leads)} лидов)")
                 processed += await self.process_batch(leads, filters, db)
-                
         logger.info(f"Скоринг завершен. Обработано лидов: {processed}/{total_count}")
         return processed
     

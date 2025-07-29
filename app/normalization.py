@@ -3,10 +3,11 @@ import re
 import logging
 from pathlib import Path
 import hashlib
-from app.config import settings
+from typing import List, Optional
 from app.database import SessionLocal
 from app.models import Lead
 from sqlalchemy.dialects.postgresql import insert
+from app.config import settings
 import os
 import csv
 from datetime import datetime
@@ -186,38 +187,35 @@ class DataNormalizer:
         source = self._detect_source(file_path.name)
         column_mapping = self._get_column_mapping(source)
         batch = []
-        
+        file_size = os.path.getsize(file_path)
+        processed_bytes = 0
         try:
-            # Получаем размер файла для прогресса
-            file_size = os.path.getsize(file_path)
-            processed_bytes = 0
-            
-            # Используем chunksize для обработки больших файлов
-            for chunk in pd.read_csv(file_path, chunksize=10000, dtype=str, encoding='utf-8', quoting=csv.QUOTE_MINIMAL):
+            # Всегда используем on_bad_lines='skip' для пропуска некорректных строк
+            for chunk in pd.read_csv(
+                file_path,
+                chunksize=10000,
+                dtype=str,
+                encoding='utf-8',
+                quoting=csv.QUOTE_MINIMAL,
+                on_bad_lines='skip'
+            ):
                 chunk = chunk.rename(columns=column_mapping)
                 for _, row in chunk.iterrows():
                     try:
                         normalized_row = self.normalize_row(row.to_dict(), source)
-                        if normalized_row['fio']:  # Пропускаем записи без ФИО
+                        if normalized_row['fio']:
                             batch.append(normalized_row)
-                            
-                            # Вставляем батч при достижении размера
                             if len(batch) >= self.batch_size:
                                 self.bulk_insert_leads(batch)
                                 batch = []
                     except Exception as e:
                         logger.warning(f"Ошибка при обработке строки: {e}")
-                
-                # Обновление прогресса
                 processed_bytes += chunk.memory_usage(index=True, deep=True).sum()
                 progress = min(100, int(processed_bytes / file_size * 100))
                 logger.info(f"File {file_path.name}: {progress}% processed")
-            
             # Вставка оставшихся данных
             if batch:
                 self.bulk_insert_leads(batch)
-            
-            # Помечаем файл как обработанный
             self.processed_files.add(file_path.name)
             return True
         except Exception as e:

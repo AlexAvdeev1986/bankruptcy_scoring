@@ -33,8 +33,8 @@ class FileManager:
         
         try:
             # Используем серверную выгрузку данных
-            async with engine.connect() as conn:
-                result = await conn.stream(
+            with engine.connect() as conn:
+                result = conn.execute(
                     text("""
                     SELECT phone, fio, score, reason_1, reason_2, reason_3, group_name as group
                     FROM leads 
@@ -42,19 +42,16 @@ class FileManager:
                     ORDER BY score DESC
                     """)
                 )
-                
                 # Потоковая запись в CSV
                 async with aiofiles.open(temp_path, 'w', encoding='utf-8', newline='') as f:
                     writer = csv.writer(f)
                     await writer.writerow(['phone', 'fio', 'score', 'reason_1', 'reason_2', 'reason_3', 'group'])
-                    
                     batch = []
-                    async for row in result:
+                    for row in result:
                         batch.append(tuple(row))
                         if len(batch) >= 10000:
                             await writer.writerows(batch)
                             batch = []
-                    
                     if batch:
                         await writer.writerows(batch)
                 
