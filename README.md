@@ -60,12 +60,38 @@ playwright install chromium
 ### 4. Настройка базы данных
 
 1. Установите PostgreSQL 15+
+Создайте пользователя и базу данных
+sudo -u postgres psql
+Затем введите следующие команды в консоли PostgreSQL:
+CREATE USER your_username WITH PASSWORD 'your_password';
+CREATE DATABASE your_database;
+GRANT ALL PRIVILEGES ON DATABASE your_database TO your_username;
+
 2. Создайте базу данных и пользователя:
+
+
+sudo -u postgres psql
+
 ```bash
-sudo -u postgres psql -c "CREATE DATABASE bankruptcy_db;"
-sudo -u postgres psql -c "CREATE USER user WITH PASSWORD 'password';"
-sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE bankruptcy_db TO user;"
+CREATE USER user WITH PASSWORD 'password';
+CREATE DATABASE bankruptcy_db;
+GRANT ALL PRIVILEGES ON DATABASE bankruptcy_db TO user;
+GRANT ALL PRIVILEGES ON SCHEMA public TO "user";
+GRANT CREATE ON SCHEMA public TO "user";
+GRANT USAGE ON SCHEMA public TO "user";
+REVOKE ALL ON SCHEMA public FROM "user";
+GRANT ALL ON SCHEMA public TO "user";
+CREATE TABLE test_table(id INT);
 ```
+Проверьте, что нет ограничений на уровне таблиц:```
+```bash
+\dn+ public
+```
+Для fedora
+sudo dnf install -y postgresql-devel python3-devel
+pip install psycopg2-binary
+4. Проверка установки
+python3 -c "import psycopg2; print(psycopg2.__version__)"
 
 3. Примените миграции:
 
