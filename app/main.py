@@ -5,6 +5,7 @@ from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from datetime import datetime
 import asyncio
 import logging
+from typing import List
 from app.config import settings
 from app.utils import PipelineManager
 from app.models import StatusResponse, ScoringRequest
@@ -50,13 +51,13 @@ class ProcessingState:
 
 state = ProcessingState()
 
+
 @app.on_event("startup")
-async def startup_event():
+def startup_event():
     """Инициализация при запуске"""
     # Создание таблиц (если не используются миграции)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    
+    with engine.begin() as conn:
+        Base.metadata.create_all(conn)
     logger.info("Application started")
     pipeline.file_manager.ensure_directories()
 

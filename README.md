@@ -48,7 +48,7 @@ venv\Scripts\activate
 ```bash
 pip install -r requirements.txt
 ```
-
+pip install playwright
 ### 3. Установка Playwright
 
 Система использует Playwright для работы с внешними источниками:
@@ -70,12 +70,39 @@ sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE bankruptcy_db TO user
 3. Примените миграции:
 
 # Инициализируйте Alembic в папке migrations
+`3. Инструкции по миграциям
+Инициализация Alembic (если еще не сделано):
+
 ```bash
 alembic init migrations
-```
+Настройка Alembic (migrations/env.py):
+
+python
+from app.config import settings
+from app.models import Base
+
+# Добавьте в начало файла
+config.set_main_option("sqlalchemy.url", str(settings.DATABASE_URL_SYNC))
+
+# В функции run_migrations_online()
+target_metadata = Base.metadata
+
+##Создание первой миграции:
+
+```bash
+alembic revision --autogenerate -m "Initial tables"
+Применение миграций:
 
 ```bash
 alembic upgrade head
+Проверка статуса:
+
+```bash
+alembic current
+Откат миграции:
+
+```bash
+alembic downgrade -1
 ```
 
 ### 5. Настройка окружения
