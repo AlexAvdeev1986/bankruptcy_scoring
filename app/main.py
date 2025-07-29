@@ -128,11 +128,10 @@ async def run_processing_pipeline(filters: dict):
             state.message = stage_message
             state.progress = int((i / total_stages) * 100)
             
-            if stage_name == "enrichment" or stage_name == "scoring":
-                func = getattr(pipeline, f"run_{stage_name}")
+            func = getattr(pipeline, f"run_{stage_name}")
+            if asyncio.iscoroutinefunction(func):
                 await func(**stage_args)
             else:
-                func = getattr(pipeline, f"run_{stage_name}")
                 func(**stage_args)
             
             state.progress = int(((i + 1) / total_stages) * 100)
